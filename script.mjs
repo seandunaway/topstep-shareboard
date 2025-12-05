@@ -5,7 +5,6 @@ let board = await fetch_board(board_filename)
 let trades = await fetch_trades(board)
 let stats = calculate_stats(trades)
 
-// update_table(elements.table, stats)
 create_grid(elements.stats, stats)
 
 console.info('trades', trades)
@@ -14,7 +13,7 @@ console.info('stats', stats)
 elements.name.textContent = board.name
 
 function get_elements () {
-	let ids = ['name', 'stats', 'table', 'chart']
+	let ids = ['name', 'stats', 'chart']
 
 	/** @type {elements} */
 	let elements = {}
@@ -187,45 +186,6 @@ function calculate_stats (/** @type {trades} */ trades) {
 	}
 
 	return stats
-}
-
-function update_table (/** @type {HTMLElement} */ table, /** @type {stats} */ stats) {
-	if (!(table instanceof HTMLTableElement))
-		return
-
-	while (table.rows.length > 1)
-		table.deleteRow(1)
-
-	for (let user in stats) {
-		let row = table.insertRow()
-
-		let user_cell = row.insertCell()
-		user_cell.innerHTML = user
-
-		let number_of_trades_cell = row.insertCell()
-		number_of_trades_cell.innerHTML = p(stats[user].number_of_trades)
-
-		let win_rate_cell = row.insertCell()
-		win_rate_cell.innerHTML = p(stats[user].win_rate)
-
-		let average_profit_cell = row.insertCell()
-		average_profit_cell.innerHTML = c(stats[user].average_profit)
-
-		let average_loss_cell = row.insertCell()
-		average_loss_cell.innerHTML = c(stats[user].average_loss)
-
-		let reward_risk_cell = row.insertCell()
-		reward_risk_cell.innerHTML = f(stats[user].reward_risk)
-
-		let expectancy_cell = row.insertCell()
-		expectancy_cell.innerHTML = f(stats[user].expectancy)
-
-		let average_pnl_cell = row.insertCell()
-		average_pnl_cell.innerHTML = c(stats[user].average_pnl)
-
-		let pnl_cell = row.insertCell()
-		pnl_cell.innerHTML = c(stats[user].pnl)
-	}
 }
 
 async function create_grid (/** @type {HTMLElement} */ element, /** @type {stats} */ stats) {
