@@ -5,6 +5,8 @@ let board = await fetch_board(board_filename)
 let trades = await fetch_trades(board)
 let stats = calculate_stats(trades)
 
+create_chart(stats)
+
 // update_table(elements.table, stats)
 create_grid(elements.stats, stats)
 
@@ -240,6 +242,67 @@ async function create_grid (/** @type {HTMLElement} */ element, /** @type {stats
 		]),
 		sort: true,
 	}).render(element)
+}
+
+function create_chart (/** @type {stats} */ stats ) {
+	// Convert object to array and sort by expectancy (descending)
+	const sortedStats = Object.entries(stats)
+		.map(([name, values]) => ({ name, expectancy: values.expectancy }))
+		.sort((a, b) => b.expectancy - a.expectancy);
+
+	// Set up dimensions
+	const margin = { top: 20, right: 30, bottom: 40, left: 60 };
+	const width = 600 - margin.left - margin.right;
+	const height = 400 - margin.top - margin.bottom;
+
+	// Create SVG
+	const svg = d3.select("body")
+		.append("svg")
+		.attr("width", width + margin.left + margin.right)
+		.attr("height", height + margin.top + margin.bottom)
+		.append("g")
+		.attr("transform", `translate(${margin.left},${margin.top})`);
+
+	// Create scales
+	const x = d3.scaleBand()
+		.domain(sortedStats.map(d => d.name))
+		.range([0, width])
+		.padding(0.2);
+
+	const y = d3.scaleLinear()
+		.domain([d3.min(sortedStats, d => d.expectancy), d3.max(sortedStats, d => d.expectancy)])
+		.nice()
+		.range([height, 0]);
+
+	// Add bars
+	svg.selectAll(".bar")
+		.data(sortedStats)
+		.enter()
+		.append("rect")
+		.attr("class", "bar")
+		.attr("x", d => x(d.name))
+		.attr("y", d => d.expectancy > 0 ? y(d.expectancy) : y(0))
+		.attr("width", x.bandwidth())
+		.attr("height", d => Math.abs(y(d.expectancy) - y(0)))
+		.attr("fill", d => d.expectancy > 0 ? "steelblue" : "crimson");
+
+	// Add x-axis
+	svg.append("g")
+		.attr("transform", `translate(0,${y(0)})`)
+		.call(d3.axisBottom(x));
+
+	// Add y-axis
+	svg.append("g")
+		.call(d3.axisLeft(y));
+
+	// Add y-axis label
+	svg.append("text")
+		.attr("transform", "rotate(-90)")
+		.attr("y", 0 - margin.left)
+		.attr("x", 0 - (height / 2))
+		.attr("dy", "1em")
+		.style("text-anchor", "middle")
+		.text("Expectancy");
 }
 
 function div (numerator = 0, denominator = 0) {
