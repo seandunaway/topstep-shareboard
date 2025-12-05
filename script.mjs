@@ -215,6 +215,12 @@ async function create_stats_grid (/** @type {HTMLElement} */ element, /** @type 
 			stat.average_pnl,
 			stat.pnl,
 		]),
+		pagination: {
+			buttonsCount: 0,
+			limit: 25,
+			summary: false,
+		},
+		search: true,
 		sort: true,
 	}).render(element)
 }
