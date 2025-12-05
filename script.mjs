@@ -5,15 +5,16 @@ let board = await fetch_board(board_filename)
 let trades = await fetch_trades(board)
 let stats = calculate_stats(trades)
 
-create_grid(elements.stats, stats)
+// @ts-ignore
+let gridjs = await import('https://unpkg.com/gridjs?module')
+create_stats_grid(elements.stats, stats)
+create_trades_grid(elements.trades, trades)
 
 console.info('trades', trades)
 console.info('stats', stats)
 
-elements.name.textContent = board.name
-
 function get_elements () {
-	let ids = ['name', 'stats', 'chart']
+	let ids = ['stats', 'chart', 'trades']
 
 	/** @type {elements} */
 	let elements = {}
@@ -188,7 +189,7 @@ function calculate_stats (/** @type {trades} */ trades) {
 	return stats
 }
 
-async function create_grid (/** @type {HTMLElement} */ element, /** @type {stats} */ stats) {
+async function create_stats_grid (/** @type {HTMLElement} */ element, /** @type {stats} */ stats) {
 	// @ts-ignore
 	let gridjs = await import('https://unpkg.com/gridjs?module')
 	new gridjs.Grid({
@@ -218,12 +219,48 @@ async function create_grid (/** @type {HTMLElement} */ element, /** @type {stats
 	}).render(element)
 }
 
+async function create_trades_grid (/** @type {HTMLElement} */ element, /** @type {trades} */ trades) {
+	new gridjs.Grid({
+		columns: [
+			{ name: 'user'},
+			{ name: 'symbol'},
+			{ name: 'start', formatter: d},
+			{ name: 'end', formatter: d},
+			{ name: 'entry', formatter: f},
+			{ name: 'exit', formatter: f},
+			{ name: 'pnl', formatter: c},
+		],
+		data: Object.entries(trades).flatMap(([user, trades]) =>
+			trades.map(trade => [
+				user,
+				trade.symbol,
+				trade.start_date,
+				trade.end_date,
+				trade.entry_price,
+				trade.exit_price,
+				trade.pnl
+			]),
+		),
+		pagination: {
+			buttonsCount: 0,
+			limit: 25,
+			summary: false,
+		},
+		search: true,
+		sort: true,
+	}).render(element)
+}
+
 function div (numerator = 0, denominator = 0) {
 	return denominator !== 0 ? numerator / denominator : 0;
 }
 
 function c (currency = 0.00) {
 	return '$' + currency.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})
+}
+
+function d (date = new Date()) {
+	return date.toLocaleString()
 }
 
 function f (float = 0.0) {
