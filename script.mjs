@@ -257,7 +257,7 @@ function c (currency = 0.00) {
 }
 
 function f (float = 0.0) {
-	return float.toLocaleString(undefined, {maximumFractionDigits: 2})
+	return float.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})
 }
 
 function n (number = 0) {
@@ -265,7 +265,7 @@ function n (number = 0) {
 }
 
 function p (percent = 0.0) {
-	return (percent * 100).toLocaleString(undefined, {maximumFractionDigits: 2}) + '%'
+	return (percent * 100).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2}) + '%'
 }
 
 /**
