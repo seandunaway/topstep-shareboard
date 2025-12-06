@@ -441,7 +441,7 @@ function create_chart (/** @type {HTMLElement} */ element, /** @type {quotes} */
 			trade_series.push({
 				...series_defaults,
 				data: winning_data,
-				lineStyle: {color: '#50fa7b', width: 4},
+				lineStyle: {color: '#50fa7b', opacity: 0.5, width: 4},
 			})
 		}
 
@@ -449,7 +449,7 @@ function create_chart (/** @type {HTMLElement} */ element, /** @type {quotes} */
 			trade_series.push({
 				...series_defaults,
 				data: losing_data,
-				lineStyle: {color: '#ff5555', width: 4},
+				lineStyle: {color: '#ff5555', opacity: 0.5, width: 4},
 			})
 		}
 	}
