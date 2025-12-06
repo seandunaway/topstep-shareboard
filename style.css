@@ -13,6 +13,10 @@ section {
 	margin-bottom: 4rem;
 }
 
+#chart {
+	height: 80vh;
+}
+
 th {
 	background-color: lightgray;
 	padding: 0.5rem;
