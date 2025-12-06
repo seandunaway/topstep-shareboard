@@ -3,22 +3,40 @@ let elements = get_elements()
 let board_filename = get_board_filename()
 let board = await fetch_board(board_filename)
 
-let trades = await fetch_trades(board)
+/** @type {symbol_map} */
+let symbol_map = {
+	'F.US.EP': 'es',
+	'F.US.MES': 'es',
+	'F.US.ENQ': 'nq',
+	'F.US.MNQ': 'nq',
+	'F.US.GCE': 'gc',
+	'F.US.MGC': 'gc',
+	'F.US.CLE': 'cl',
+	'F.US.MCL': 'cl',
+}
+
+let trades = await fetch_trades(board, symbol_map)
 let stats = calculate_stats(trades)
+
 let stats_grid = create_stats_grid(elements.stats, stats)
 let trades_grid = create_trades_grid(elements.trades, trades)
 
-let default_symbol = 'F.US.EP'
-let symbol_map = get_symbol_map()
-let symbol_select = populate_symbol_select(elements.symbol_select, symbol_map)
+let symbols = populate_symbols(elements.symbol, symbol_map)
+let quotes = await fetch_quotes(symbols.value)
+let chart = create_chart(elements.chart, quotes, trades, symbols.value)
 
-let quotes = await fetch_quotes(default_symbol)
-let chart = create_chart(elements.chart, quotes, trades, default_symbol)
+symbols.addEventListener('change', async function (event) {
+	quotes = await fetch_quotes(symbols.value)
+	chart.dispose()
+	chart = create_chart(elements.chart, quotes, trades, symbols.value)
+})
+
+window.addEventListener('resize', function () {chart.resize()})
 
 function get_elements () {
-	let ids = ['stats', 'symbol_select', 'chart', 'trades']
+	let ids = ['stats', 'symbol', 'chart', 'trades']
 
-	/** @type {elements} */
+	/** @type {{[id: string]: HTMLElement}} */
 	let elements = {}
 
 	for (let id of ids) {
@@ -67,7 +85,7 @@ async function fetch_board (/** @type {string} */ board_filename) {
 	return board
 }
 
-async function fetch_trades (/** @type {board} */ board) {
+async function fetch_trades (/** @type {board} */ board, /** @type {symbol_map} */ symbol_map) {
 	let url = 'https://userapi.topstepx.com/Trade/range'
 
 	/** @type {trades} */
@@ -86,26 +104,22 @@ async function fetch_trades (/** @type {board} */ board) {
 				end: board.end_date.toISOString(),
 			}
 
-			/** @type {Response} */
-			let response
 			let response_array
-
 			try {
-				response = await fetch(url, {
-					method: 'post',
-					headers: {'content-type': 'application/json'},
-					body: JSON.stringify(payload),
-				})
-
+				let response = await fetch(url, {method: 'post', headers: {'content-type': 'application/json'}, body: JSON.stringify(payload)})
 				response_array = await response.json()
 			} catch (error) {
 				console.error('fetch_data:', user, share_id)
 				continue
 			}
 
-			let scale_count = 0
-
 			for (let response_trade of response_array) {
+				let symbol = symbol_map[response_trade.symbolId]
+				if (!symbol) {
+					console.error('symbol:', response_trade.symbolId)
+					symbol = response_trade.symbolId
+				}
+
 				let start_date = new Date(response_trade.createdAt)
 				if (start_date < board.start_date)
 					continue
@@ -114,28 +128,30 @@ async function fetch_trades (/** @type {board} */ board) {
 				if (end_date > board.end_date)
 					continue
 
-				let pnl = (response_trade.pnL - response_trade.fees) / Math.abs(response_trade.positionSize)
+				let pnl = response_trade.pnL - response_trade.fees
 
-				scale_count++
+				let last_trade = trades[user].at(-1)
 
-				let previous_trade = trades[user].at(-1)
-				if (previous_trade && start_date < previous_trade.end_date) {
-					previous_trade.entry_price = (previous_trade.entry_price * scale_count + response_trade.entryPrice) / (scale_count + 1)
-					previous_trade.exit_price = (previous_trade.exit_price * scale_count + response_trade.exitPrice) / (scale_count + 1)
-					previous_trade.pnl = (previous_trade.pnl * scale_count + pnl) / (scale_count + 1)
+				if (last_trade && symbol == last_trade.symbol && start_date <= last_trade.end_date) {
+					let count = last_trade.count
+					last_trade.start_date = last_trade.start_date < start_date ? last_trade.start_date : start_date;
+					last_trade.end_date = last_trade.end_date > end_date ? last_trade.end_date : end_date
+					last_trade.entry_price = (last_trade.entry_price * count + response_trade.entryPrice) / (count + 1)
+					last_trade.exit_price = (last_trade.exit_price * count + response_trade.exitPrice) / (count + 1)
+					last_trade.pnl += pnl
+					last_trade.count = count + 1
 
 					continue
 				}
 
-				scale_count = 0
-
 				let trade = {
-					symbol: response_trade.symbolId,
+					symbol: symbol,
 					start_date: start_date,
 					end_date: end_date,
 					entry_price: response_trade.entryPrice,
 					exit_price: response_trade.exitPrice,
 					pnl: pnl,
+					count: 1,
 				}
 
 				trades[user].push(trade)
@@ -166,25 +182,24 @@ function calculate_stats (/** @type {trades} */ trades) {
 			}
 		}
 
-		let number_of_trades = trades[user].length
-		let total = won + lost
-		let win_rate = div(won, total)
-		let average_profit = div(profit, won)
-		let average_loss = div(loss, lost)
-		let reward_risk = div(average_profit, average_loss)
-		let expectancy = (win_rate * reward_risk) - ((1 - win_rate) * 1)
-		let pnl = profit - loss
-		let average_pnl = div(pnl, total)
+		let qty = won + lost
+		let avg_profit = div(profit, won)
+		let avg_loss = div(loss, lost)
+		let win_rate = div(won, qty)
+		let r = div(avg_profit, avg_loss)
+		let edge = qty > 0 ? (win_rate * r) - ((1 - win_rate) * 1) : 0
+		let balance = profit - loss
+		let pnl_per_trade = div(balance, qty)
 
 		stats[user] = {
-			number_of_trades,
+			qty,
+			avg_profit,
+			avg_loss,
 			win_rate,
-			average_profit,
-			average_loss,
-			reward_risk,
-			expectancy,
-			average_pnl,
-			pnl,
+			r,
+			edge,
+			balance,
+			pnl_per_trade,
 		}
 	}
 
@@ -198,14 +213,14 @@ async function create_stats_grid (/** @type {HTMLElement} */ element, /** @type 
 		let stat = stats[user]
 		data.push([
 			user,
-			stat.number_of_trades,
+			stat.qty,
+			stat.avg_profit,
+			stat.avg_loss,
 			stat.win_rate,
-			stat.average_profit,
-			stat.average_loss,
-			stat.reward_risk,
-			stat.expectancy,
-			stat.average_pnl,
-			stat.pnl,
+			stat.r,
+			stat.edge,
+			stat.pnl_per_trade,
+			stat.balance,
 		])
 	}
 
@@ -213,14 +228,14 @@ async function create_stats_grid (/** @type {HTMLElement} */ element, /** @type 
 	let grid = new gridjs.Grid({
 		columns: [
 			{name: 'user'},
-			{name: '#'},
-			{name: 'win rate', formatter:  p},
-			{name: 'average profit', formatter:  c},
-			{name: 'average_loss', formatter:  c},
+			{name: 'qty'},
+			{name: 'avg_profit', formatter:  c},
+			{name: 'avg_loss', formatter:  c},
+			{name: 'win_rate', formatter:  p},
 			{name: 'r', formatter:  f},
-			{name: 'expectancy', formatter:  f},
-			{name: 'average pnl', formatter:  c},
-			{name: 'total pnl', formatter:  c},
+			{name: 'edge', formatter:  f},
+			{name: 'pnl / trade', formatter:  c},
+			{name: 'balance', formatter:  c},
 		],
 		data: data,
 		pagination: {
@@ -250,6 +265,7 @@ async function create_trades_grid (/** @type {HTMLElement} */ element, /** @type
 				trade.entry_price,
 				trade.exit_price,
 				trade.pnl,
+				trade.count,
 			])
 		}
 	}
@@ -257,13 +273,14 @@ async function create_trades_grid (/** @type {HTMLElement} */ element, /** @type
 	// @ts-ignore
 	let grid = new gridjs.Grid({
 		columns: [
-			{ name: 'user'},
-			{ name: 'symbol'},
-			{ name: 'start', formatter: d},
-			{ name: 'end', formatter: d},
-			{ name: 'entry', formatter: f},
-			{ name: 'exit', formatter: f},
-			{ name: 'pnl', formatter: c},
+			{name: 'user'},
+			{name: 'symbol'},
+			{name: 'start', formatter: d},
+			{name: 'end', formatter: d},
+			{name: 'entry', formatter: f},
+			{name: 'exit', formatter: f},
+			{name: 'pnl', formatter: c},
+			{name: '#', formatter: n},
 		],
 		data: data,
 		pagination: {
@@ -280,27 +297,27 @@ async function create_trades_grid (/** @type {HTMLElement} */ element, /** @type
 	return grid
 }
 
-function get_symbol_map () {
-	/** @type {symbol_map} */
-	let symbol_map = {
-		'F.US.EP': 'ES=F',
-		'F.US.MES': 'ES=F',
-		'F.US.ENQ': 'NQ=F',
-		'F.US.MNQ': 'NQ=F',
-		'F.US.GCE': 'GC=F',
-		'F.US.MGC': 'GC=F',
-		'F.US.CLE': 'CL=F',
-	}
-
-	return symbol_map
-}
-
-function populate_symbol_select (/** @type {HTMLElement} */ element, /** @type {symbol_map} */ symbol_map) {
+function populate_symbols (/** @type {HTMLElement} */ element, /** @type {symbol_map} */ symbol_map) {
 	if (!(element instanceof HTMLSelectElement))
-		return
+		throw new Error('populate_symbols')
 
-	for (let symbol in symbol_map)
+	for (let key in symbol_map) {
+		let symbol = symbol_map[key]
+
+		let exists = false
+
+		for (let option of element.options) {
+			if (option.value == symbol) {
+				exists = true
+				break
+			}
+		}
+
+		if (exists)
+			continue
+
 		element.options.add(new Option(symbol, symbol))
+	}
 
 	return element
 }
@@ -308,27 +325,18 @@ function populate_symbol_select (/** @type {HTMLElement} */ element, /** @type {
 async function fetch_quotes (/** @type {string} */ symbol) {
 	let proxy_url = decodeURIComponent('%68%74%74%70%3A%2F%2F%64%65%76%65%6C%2E%73%65%61%6E%64%75%6E%61%77%61%79%2E%63%6F%6D%3A%38%38%38%38%2F')
 	let base_url = 'https://query1.finance.yahoo.com/v8/finance/chart/'
-
-	let symbol_map = get_symbol_map()
-	symbol = symbol_map[symbol]
-
 	let interval = '1m'
 	let range = '5d'
 
-	let url = `${proxy_url}${base_url}${symbol}?&interval=${interval}&range=${range}`
+	let url = `${proxy_url}${base_url}${symbol}=f?&interval=${interval}&range=${range}`
 
-	/** @type {Response} */
-	let response
-	let response_object
 	let result
-
 	try {
-		response = await fetch(url)
-		response_object = await response.json()
-
+		let response = await fetch(url)
+		let response_object = await response.json()
 		result = response_object.chart.result[0]
 	} catch (error) {
-		console.error('fetch_market')
+		console.error('fetch_quotes:', url)
 	}
 
 	/** @type {quotes} */
@@ -386,14 +394,14 @@ function create_chart (/** @type {HTMLElement} */ element, /** @type {quotes} */
 	let trade_series = []
 
 	for (let user in trades) {
-		/** @type {any} */
-		let winning_trades = []
-		/** @type {any} */
-		let losing_trades = []
+		/** @type {chart_data} */
+		let winning_data = []
+		/** @type {chart_data} */
+		let losing_data = []
 
 		for (let trade of trades[user]) {
-			// if (trade.symbol !== symbol)
-			// 	continue
+			if (trade.symbol !== symbol)
+				continue
 
 			if (trade.start_date.getTime() < min_timestamp)
 				continue
@@ -410,13 +418,13 @@ function create_chart (/** @type {HTMLElement} */ element, /** @type {quotes} */
 			let target
 
 			if (trade.entry_price >= trade.exit_price)
-				target = winning_trades
+				target = winning_data
 			else
-				target = losing_trades
+				target = losing_data
 
 			target.push({value: [trade.start_date, trade.entry_price], pnl: trade.pnl})
 			target.push({value: [trade.end_date, trade.exit_price], pnl: trade.pnl})
-			target.push({value: [null, null], pnl: null})
+			target.push({value: [null, null], pnl: 0})
 		}
 
 		let series_defaults = {
@@ -429,17 +437,21 @@ function create_chart (/** @type {HTMLElement} */ element, /** @type {quotes} */
 			symbolSize: 12,
 		}
 
-		trade_series.push({
-			...series_defaults,
-			data: winning_trades,
-			lineStyle: {color: '#50fa7b', width: 4},
-		})
+		if (winning_data.length > 0) {
+			trade_series.push({
+				...series_defaults,
+				data: winning_data,
+				lineStyle: {color: '#50fa7b', width: 4},
+			})
+		}
 
-		trade_series.push({
-			...series_defaults,
-			data: losing_trades,
-			lineStyle: {color: '#ff5555', width: 4},
-		})
+		if (losing_data.length > 0) {
+			trade_series.push({
+				...series_defaults,
+				data: losing_data,
+				lineStyle: {color: '#ff5555', width: 4},
+			})
+		}
 	}
 
 	let default_zoom_start = quotes[quotes.length - 1].date.getTime() - 24 * 60 * 60 * 1000
@@ -451,14 +463,13 @@ function create_chart (/** @type {HTMLElement} */ element, /** @type {quotes} */
 		dataZoom: [{startValue: default_zoom_start, endValue: max_timestamp}],
 		grid: {top: 0, right: 0, bottom: 0, left: 0},
 		legend: {show: true, backgroundColor: 'white', orient: 'vertical', type: 'scroll', top: 'middle', left: 0},
-		tooltip: {trigger: 'item', formatter: function (/** @type {any} */ p) {return `<b>${p.seriesName}</b><br>${c(p.data.pnl)}`}},
+		tooltip: {trigger: 'item', formatter: function (/** @type {any} */ p) {return p.data?.pnl ? `<b>${p.seriesName}</b><br>${c(p.data.pnl)}` : ''}},
 	}
 
 	chart.setOption(options)
 
-	let chart_dom = chart.getDom()
+	let chart_dom = chart.getDom();
 	chart_dom.addEventListener('dblclick', function () {chart.dispatchAction({type: 'dataZoom', startValue: default_zoom_start, endValue: max_timestamp})})
-	window.addEventListener('resize', function () {chart.resize()})
 
 	return chart
 }
@@ -489,12 +500,6 @@ function p (percent = 0.00) {
 
 /**
  * @typedef {{
- * 	[id: string]: HTMLElement,
- * }} elements
- */
-
-/**
- * @typedef {{
  * 	name: string,
  *	allow_practice: boolean,
  *	allow_combine: boolean,
@@ -502,10 +507,14 @@ function p (percent = 0.00) {
  *	allow_multiple: boolean,
  *	start_date: Date,
  *	end_date: Date,
- *	shares: {
- *		[user: string]: number[],
- *	},
+ *	shares: {[user: string]: number[]},
  * }} board
+ */
+
+/**
+ * @typedef {{
+ * 	[key: string]: string
+ * }} symbol_map
  */
 
 /**
@@ -517,6 +526,7 @@ function p (percent = 0.00) {
  * 		entry_price: number,
  * 		exit_price: number,
  * 		pnl: number,
+ * 		count: number,
  * 	}[]
  * }} trades
  */
@@ -524,20 +534,16 @@ function p (percent = 0.00) {
 /**
  * @typedef {{
  * 	[user: string]: {
- * 		number_of_trades: number,
+ * 		qty: number,
+ * 		avg_profit: number,
+ * 		avg_loss: number,
  * 		win_rate: number,
- * 		average_profit: number,
- * 		average_loss: number,
- * 		reward_risk: number,
- * 		expectancy: number,
- * 		average_pnl: number,
- * 		pnl: number,
+ * 		r: number,
+ * 		edge: number,
+ * 		pnl_per_trade: number,
+ * 		balance: number,
  * 	}
  * }} stats
- */
-
-/**
- * @typedef {Record<string, string>} symbol_map
  */
 
 /**
@@ -545,4 +551,11 @@ function p (percent = 0.00) {
  * 	date: Date,
  * 	price: number,
  * }[]} quotes
+ */
+
+/**
+ * @typedef {{
+ * 	value: [Date | null, number | null],
+ * 	pnl: number,
+ * }[]} chart_data
  */
